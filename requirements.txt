@@ -1,0 +1,27 @@
+# AWS SDK
+boto3>=1.34.0
+botocore>=1.34.0
+
+# Database
+psycopg2-binary>=2.9.9
+
+# Database migrations
+alembic>=1.13.0
+SQLAlchemy>=2.0.0
+
+# Web framework for local development
+flask>=3.0.0
+flask-cors>=4.0.0
+
+# Utilities
+python-dateutil>=2.8.2
+requests>=2.31.0
+
+# Development and testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+moto>=4.2.0  # For mocking AWS services in tests
+black>=23.0.0  # Code formatting
+flake8>=6.0.0  # Linting
+alembic
+pytest
