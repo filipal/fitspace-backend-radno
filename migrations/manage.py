@@ -138,6 +138,8 @@ def init_database():
     """
     Initialize the database with basic tables
     """
+    connection = None
+    cursor = None
     try:
         connection, _ = get_database_connection()
         cursor = connection.cursor()
@@ -158,6 +160,23 @@ def init_database():
             );
         """)
         
+
+        # Avatars table linked to users
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS avatars (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL UNIQUE,
+                image_url TEXT,
+                thumbnail_url TEXT,
+                storage_key VARCHAR(255),
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT fk_avatars_user FOREIGN KEY (user_id)
+                    REFERENCES users(id) ON DELETE CASCADE
+            );
+        """)
+
         # Indexes for better performance
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
@@ -170,7 +189,19 @@ def init_database():
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_users_name ON users(name);
         """)
-        
+
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_avatars_user_id ON avatars(user_id);
+        """)
+
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_avatars_is_active ON avatars(is_active);
+        """)
+
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_avatars_created_at ON avatars(created_at);
+        """)
+
         # Function to automatically update updated_at timestamp
         cursor.execute("""
             CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -190,27 +221,55 @@ def init_database():
                 FOR EACH ROW
                 EXECUTE FUNCTION update_updated_at_column();
         """)
-        
+
+        cursor.execute("""
+            DROP TRIGGER IF EXISTS update_avatars_updated_at ON avatars;
+            CREATE TRIGGER update_avatars_updated_at
+                BEFORE UPDATE ON avatars
+                FOR EACH ROW
+                EXECUTE FUNCTION update_updated_at_column();
+        """)
+
         # Insert some sample data (optional)
         cursor.execute("""
-            INSERT INTO users (name, email, phone, bio) VALUES 
+            INSERT INTO users (name, email, phone, bio) VALUES
             ('John Doe', 'john@example.com', '+1-555-0123', 'Software developer passionate about fitness'),
             ('Jane Smith', 'jane@example.com', '+1-555-0124', 'Personal trainer and nutrition coach')
             ON CONFLICT (email) DO NOTHING;
         """)
-        
+
+
+        cursor.execute("""
+            INSERT INTO avatars (user_id, image_url, thumbnail_url, storage_key, is_active) VALUES
+            ((SELECT id FROM users WHERE email = 'john@example.com'),
+             'https://cdn.example.com/avatars/john.png',
+             'https://cdn.example.com/avatars/john-thumb.png',
+             'avatars/john.png',
+             TRUE),
+            ((SELECT id FROM users WHERE email = 'jane@example.com'),
+             'https://cdn.example.com/avatars/jane.png',
+             'https://cdn.example.com/avatars/jane-thumb.png',
+             'avatars/jane.png',
+             TRUE)
+            ON CONFLICT (user_id) DO NOTHING;
+        """)
+
         connection.commit()
         print("✅ Database schema created successfully")
         print("✅ Sample data inserted")
-        
-        cursor.close()
-        connection.close()
+
         
     except Exception as e:
+        if connection:
+            connection.rollback()
         logger.error(f"Failed to initialize database: {str(e)}")
         print(f"❌ Failed to initialize database: {str(e)}")
         sys.exit(1)
-
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
