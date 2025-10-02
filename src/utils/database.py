@@ -132,17 +132,23 @@ def execute_query(connection, query, params=None, fetch=True, timeout=10):
             logger.warning("Could not set statement timeout - continuing without query timeout")
         
         cursor.execute(query, params)
-        
+
         if fetch:
-            if query.strip().upper().startswith('SELECT'):
-                # For SELECT queries, fetch results
-                columns = [desc[0] for desc in cursor.description]
+            query_text = " ".join(query) if isinstance(query, (list, tuple)) else str(query)
+            query_upper = query_text.strip().upper()
+            has_returning = "RETURNING" in query_upper
+            has_result_set = cursor.description is not None
+
+            if has_result_set or has_returning:
+                columns = [desc[0] for desc in cursor.description] if cursor.description else []
                 rows = cursor.fetchall()
-                result = [dict(zip(columns, row)) for row in rows]
-                return result
-            else:
-                # For non-SELECT queries, return affected row count
-                return cursor.rowcount
+                if columns:
+                    return [dict(zip(columns, row)) for row in rows]
+                # Fallback: return rows without column mapping if description missing
+                return [dict(enumerate(row)) for row in rows]
+
+            # For statements without a result set, return affected row count
+            return cursor.rowcount
         else:
             connection.commit()
             return cursor.rowcount
