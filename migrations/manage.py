@@ -165,7 +165,7 @@ def init_database():
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS avatars (
                 id SERIAL PRIMARY KEY,
-                user_id INTEGER NOT NULL UNIQUE,
+                user_id INTEGER NOT NULL,
                 display_name VARCHAR(255),
                 age INTEGER,
                 gender VARCHAR(50),

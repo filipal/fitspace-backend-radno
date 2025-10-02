@@ -13,6 +13,11 @@ This backend is designed as a serverless application that runs on AWS Lambda and
 - **Secrets Manager**: Secure credential storage
 - **S3**: Lambda deployment package storage
 
+## Avatar Model
+
+Users can create multiple avatars to capture different training profiles (for example, "Cut" and "Bulk" personas). The database schema, initialization script, and application logic intentionally omit a unique constraint on `user_id` in the `avatars` table so that several records may belong to the same user. Use the avatar endpoints under `/api/v1/users/{user_id}/avatars` to manage these profiles.
+
+
 ## Project Structure
 
 ```

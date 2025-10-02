@@ -17,11 +17,17 @@ def connection():
 def test_list_by_user_executes_expected_query(connection):
     rows = [
         {
+            "id": 2,
+            "user_id": 3,
+            "display_name": "Latest",
+            "height_cm": Decimal("175.0"),
+        },
+        {
             "id": 1,
             "user_id": 3,
             "display_name": "Test",
             "height_cm": Decimal("180.0"),
-        }
+        },
     ]
     expected_query = (
         "SELECT *\n"
@@ -39,11 +45,17 @@ def test_list_by_user_executes_expected_query(connection):
     connection.rollback.assert_not_called()
     assert result == [
         {
+            "id": 2,
+            "user_id": 3,
+            "display_name": "Latest",
+            "height_cm": 175.0,
+        },
+        {
             "id": 1,
             "user_id": 3,
             "display_name": "Test",
             "height_cm": 180.0,
-        }
+        },
     ]
 
 

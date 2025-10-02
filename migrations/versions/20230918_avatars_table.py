@@ -18,6 +18,7 @@ def upgrade() -> None:
     op.create_table(
         "avatars",
         sa.Column("id", sa.Integer(), primary_key=True, nullable=False),
+        # Allow multiple avatars per user, so user_id remains non-unique.
         sa.Column("user_id", sa.Integer(), nullable=False),
         sa.Column("display_name", sa.String(length=255), nullable=True),
         sa.Column("age", sa.Integer(), nullable=True),
