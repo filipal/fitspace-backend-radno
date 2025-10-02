@@ -161,15 +161,21 @@ def init_database():
         """)
         
 
-        # Avatars table linked to users
+        # Avatars table linked to users with extended profile attributes
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS avatars (
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER NOT NULL UNIQUE,
-                image_url TEXT,
-                thumbnail_url TEXT,
-                storage_key VARCHAR(255),
-                is_active BOOLEAN DEFAULT TRUE,
+                display_name VARCHAR(255),
+                age INTEGER,
+                gender VARCHAR(50),
+                height_cm NUMERIC(5, 2),
+                weight_kg NUMERIC(5, 2),
+                body_fat_percent NUMERIC(5, 2),
+                shoulder_circumference_cm NUMERIC(5, 2),
+                waist_cm NUMERIC(5, 2),
+                hips_cm NUMERIC(5, 2),
+                notes TEXT,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 CONSTRAINT fk_avatars_user FOREIGN KEY (user_id)
@@ -195,11 +201,12 @@ def init_database():
         """)
 
         cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_avatars_is_active ON avatars(is_active);
+            CREATE INDEX IF NOT EXISTS idx_avatars_display_name ON avatars(display_name);
         """)
 
         cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_avatars_created_at ON avatars(created_at);
+            CREATE INDEX IF NOT EXISTS idx_avatars_display_name_gender
+                ON avatars(display_name, gender);
         """)
 
         # Function to automatically update updated_at timestamp
@@ -240,17 +247,41 @@ def init_database():
 
 
         cursor.execute("""
-            INSERT INTO avatars (user_id, image_url, thumbnail_url, storage_key, is_active) VALUES
+            INSERT INTO avatars (
+                user_id,
+                display_name,
+                age,
+                gender,
+                height_cm,
+                weight_kg,
+                body_fat_percent,
+                shoulder_circumference_cm,
+                waist_cm,
+                hips_cm,
+                notes
+            ) VALUES
             ((SELECT id FROM users WHERE email = 'john@example.com'),
-             'https://cdn.example.com/avatars/john.png',
-             'https://cdn.example.com/avatars/john-thumb.png',
-             'avatars/john.png',
-             TRUE),
+             'John "The Rock" Doe',
+             32,
+             'male',
+             185.42,
+             88.50,
+             12.75,
+             120.00,
+             82.00,
+             96.00,
+             'Prefers strength-focused training.'),
             ((SELECT id FROM users WHERE email = 'jane@example.com'),
-             'https://cdn.example.com/avatars/jane.png',
-             'https://cdn.example.com/avatars/jane-thumb.png',
-             'avatars/jane.png',
-             TRUE)
+             'Coach Jane',
+             29,
+             'female',
+             170.18,
+             63.40,
+             18.20,
+             105.00,
+             68.50,
+             94.00,
+             'Leads HIIT sessions twice a week.')
             ON CONFLICT (user_id) DO NOTHING;
         """)
 
