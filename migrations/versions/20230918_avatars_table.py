@@ -42,6 +42,13 @@ def upgrade() -> None:
         ["display_name", "gender"],
     )
 
+    op.create_index(
+        "ux_avatars_user_id_display_name",
+        "avatars",
+        ["user_id", "display_name"],
+        unique=True,
+    )
+
     op.create_foreign_key(
         "fk_avatars_user_id_users",
         "avatars",
@@ -90,6 +97,7 @@ def downgrade() -> None:
     )
 
     op.drop_constraint("fk_avatars_user_id_users", "avatars", type_="foreignkey")
+    op.drop_index("ux_avatars_user_id_display_name", table_name="avatars")
     op.drop_index("ix_avatars_display_name_gender", table_name="avatars")
     op.drop_index("ix_avatars_display_name", table_name="avatars")
     op.drop_index("ix_avatars_user_id", table_name="avatars")

@@ -209,6 +209,11 @@ def init_database():
                 ON avatars(display_name, gender);
         """)
 
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_avatars_user_id_display_name
+                ON avatars(user_id, display_name);
+        """)
+
         # Function to automatically update updated_at timestamp
         cursor.execute("""
             CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -282,7 +287,7 @@ def init_database():
              68.50,
              94.00,
              'Leads HIIT sessions twice a week.')
-            ON CONFLICT (user_id) DO NOTHING;
+            ON CONFLICT (user_id, display_name) DO NOTHING;
         """)
 
         connection.commit()
