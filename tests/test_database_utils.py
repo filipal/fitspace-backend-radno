@@ -1,9 +1,12 @@
 """Tests for database utility helpers."""
+import json
 from unittest.mock import MagicMock
 
 import pytest
 
-from src.utils.database import execute_query
+from src.utils import database
+
+execute_query = database.execute_query
 
 
 def _make_cursor(*, description=None, rows=None, rowcount=0, execute_side_effect=None):
@@ -19,6 +22,32 @@ def _make_connection(cursor):
     connection = MagicMock()
     connection.cursor.return_value = cursor
     return connection
+
+def _clear_connection_env(monkeypatch):
+    for key in [
+        'DB_HOST',
+        'DB_NAME',
+        'DB_USERNAME',
+        'DB_PASSWORD',
+        'DB_SECRET_ARN',
+        'DB_PROXY_ENDPOINT',
+        'DB_CLUSTER_ENDPOINT',
+    ]:
+        monkeypatch.delenv(key, raising=False)
+
+
+def _mock_secret_client(monkeypatch, secret_dict):
+    secrets_client = MagicMock()
+    secrets_client.get_secret_value.return_value = {'SecretString': json.dumps(secret_dict)}
+    monkeypatch.setattr(database.boto3, 'client', lambda *args, **kwargs: secrets_client)
+    return secrets_client
+
+
+def _mock_psycopg_connect(monkeypatch):
+    connection = MagicMock()
+    connect_mock = MagicMock(return_value=connection)
+    monkeypatch.setattr(database.psycopg2, 'connect', connect_mock)
+    return connect_mock, connection
 
 
 @pytest.mark.parametrize(
@@ -83,3 +112,73 @@ def test_execute_query_commit_and_rowcount_when_fetch_false():
     assert result == 2
     cursor.fetchall.assert_not_called()
     connection.commit.assert_called_once()
+
+
+def test_get_database_connection_prefers_cluster_endpoint(monkeypatch):
+    """Secrets-based connections should prioritise the cluster endpoint when provided."""
+    _clear_connection_env(monkeypatch)
+    monkeypatch.setenv('DB_SECRET_ARN', 'arn:secret')
+    monkeypatch.setenv('DB_CLUSTER_ENDPOINT', 'cluster.example.com')
+
+    secret = {'username': 'user', 'password': 'pass', 'dbname': 'db', 'port': 5432, 'host': 'secret-host'}
+    secrets_client = _mock_secret_client(monkeypatch, secret)
+    connect_mock, connection = _mock_psycopg_connect(monkeypatch)
+
+    result = database.get_database_connection()
+
+    connect_mock.assert_called_once_with(
+        host='cluster.example.com',
+        database='db',
+        user='user',
+        password='pass',
+        port=5432,
+        connect_timeout=5,
+    )
+    secrets_client.get_secret_value.assert_called_once()
+    assert result is connection
+    assert connection.autocommit is False
+
+
+def test_get_database_connection_uses_secret_host_when_available(monkeypatch):
+    """When the secret includes a host value, it should be used without a proxy."""
+    _clear_connection_env(monkeypatch)
+    monkeypatch.setenv('DB_SECRET_ARN', 'arn:secret')
+
+    secret = {'username': 'user', 'password': 'pass', 'dbname': 'db', 'port': 5432, 'host': 'secret-host'}
+    _mock_secret_client(monkeypatch, secret)
+    connect_mock, connection = _mock_psycopg_connect(monkeypatch)
+
+    database.get_database_connection()
+
+    connect_mock.assert_called_once_with(
+        host='secret-host',
+        database='db',
+        user='user',
+        password='pass',
+        port=5432,
+        connect_timeout=5,
+    )
+    assert connection.autocommit is False
+
+
+def test_get_database_connection_falls_back_to_proxy_endpoint(monkeypatch):
+    """If no cluster or secret host is present the proxy endpoint should be used."""
+    _clear_connection_env(monkeypatch)
+    monkeypatch.setenv('DB_SECRET_ARN', 'arn:secret')
+    monkeypatch.setenv('DB_PROXY_ENDPOINT', 'proxy.example.com')
+
+    secret = {'username': 'user', 'password': 'pass', 'dbname': 'db', 'port': 5432}
+    _mock_secret_client(monkeypatch, secret)
+    connect_mock, connection = _mock_psycopg_connect(monkeypatch)
+
+    database.get_database_connection()
+
+    connect_mock.assert_called_once_with(
+        host='proxy.example.com',
+        database='db',
+        user='user',
+        password='pass',
+        port=5432,
+        connect_timeout=5,
+    )
+    assert connection.autocommit is False

@@ -15,6 +15,8 @@ def get_database_connection(timeout=5):
     Get database connection via RDS Proxy using environment variables or AWS Secrets Manager fallback
     Uses shorter timeout and better error handling to prevent hangs
     """
+    endpoint_context = 'unknown endpoint'
+
     try:
         # Try to use environment variables first (preferred method)
         if all(key in os.environ for key in ['DB_HOST', 'DB_NAME', 'DB_USERNAME', 'DB_PASSWORD']):
@@ -25,7 +27,8 @@ def get_database_connection(timeout=5):
             db_password = os.environ['DB_PASSWORD']
             db_port = int(os.environ.get('DB_PORT', 5432))
             
-            logger.info(f"Connecting to database via RDS Proxy: {db_host}")
+            endpoint_context = f"DB_HOST environment variable ({db_host})"
+            logger.info(f"Connecting to database via environment host: {db_host}")
             connection = psycopg2.connect(
                 host=db_host,
                 database=db_name,
@@ -40,7 +43,6 @@ def get_database_connection(timeout=5):
         else:
             logger.info("Environment variables not found, falling back to Secrets Manager")
             db_secret_arn = os.environ['DB_SECRET_ARN']
-            db_proxy_endpoint = os.environ['DB_PROXY_ENDPOINT']
             
             # Get database credentials from Secrets Manager with timeout
             secrets_client = boto3.client('secretsmanager', config=boto3.session.Config(
@@ -53,10 +55,20 @@ def get_database_connection(timeout=5):
             secret_response = secrets_client.get_secret_value(SecretId=db_secret_arn)
             secret = json.loads(secret_response['SecretString'])
             
-            # Connect to database via RDS Proxy with aggressive timeouts
-            logger.info(f"Connecting to database via RDS Proxy: {db_proxy_endpoint}")
+            # Determine which endpoint to use for the connection
+            if os.environ.get('DB_CLUSTER_ENDPOINT'):
+                endpoint = os.environ['DB_CLUSTER_ENDPOINT']
+                endpoint_context = f"DB_CLUSTER_ENDPOINT environment variable ({endpoint})"
+            elif secret.get('host'):
+                endpoint = secret['host']
+                endpoint_context = f"secret host value ({endpoint})"
+            else:
+                endpoint = os.environ['DB_PROXY_ENDPOINT']
+                endpoint_context = f"DB_PROXY_ENDPOINT environment variable ({endpoint})"
+
+            logger.info(f"Connecting to database using {endpoint_context}")
             connection = psycopg2.connect(
-                host=db_proxy_endpoint,
+                host=endpoint,
                 database=secret.get('dbname', secret.get('engine', 'fitspace')),
                 user=secret['username'],
                 password=secret['password'],
@@ -76,22 +88,28 @@ def get_database_connection(timeout=5):
         # Check which environment variables are missing
         if not all(key in os.environ for key in ['DB_HOST', 'DB_NAME', 'DB_USERNAME', 'DB_PASSWORD']):
             missing_env_vars.extend(['DB_HOST', 'DB_NAME', 'DB_USERNAME', 'DB_PASSWORD'])
-        if 'DB_SECRET_ARN' not in os.environ and 'DB_PROXY_ENDPOINT' not in os.environ:
-            missing_env_vars.extend(['DB_SECRET_ARN', 'DB_PROXY_ENDPOINT'])
+        if 'DB_SECRET_ARN' not in os.environ:
+            missing_env_vars.append('DB_SECRET_ARN')
+        secret_host_available = 'secret' in locals() and isinstance(secret, dict) and secret.get('host')
+        if not secret_host_available and not any(key in os.environ for key in ['DB_CLUSTER_ENDPOINT', 'DB_PROXY_ENDPOINT']):
+            missing_env_vars.extend(['DB_CLUSTER_ENDPOINT', 'DB_PROXY_ENDPOINT'])
         
         logger.error(f"Missing environment variables for database connection: {missing_env_vars}")
-        raise Exception(f"Missing required environment variables. Need either [DB_HOST, DB_NAME, DB_USERNAME, DB_PASSWORD] or [DB_SECRET_ARN, DB_PROXY_ENDPOINT]: {str(e)}")
+        raise Exception(f"Missing required environment variables. Need either [DB_HOST, DB_NAME, DB_USERNAME, DB_PASSWORD] or [DB_SECRET_ARN plus DB_CLUSTER_ENDPOINT/DB_PROXY_ENDPOINT]: {str(e)}")
     
     except psycopg2.OperationalError as e:
-        logger.error(f"Database connection timeout/operational error: {str(e)}")
-        raise Exception(f"Database connection failed (timeout or connectivity issue): {str(e)}")
+        error_message = f"Database connection failed (timeout or connectivity issue) while using {endpoint_context}: {str(e)}"
+        logger.error(error_message)
+        raise Exception(error_message)
     
     except psycopg2.Error as e:
-        logger.error(f"Database connection error: {str(e)}")
-        raise Exception(f"Database connection failed: {str(e)}")
+        error_message = f"Database connection failed while using {endpoint_context}: {str(e)}"
+        logger.error(error_message)
+        raise Exception(error_message)
     
     except Exception as e:
         logger.error(f"Unexpected error getting database connection: {str(e)}")
+        logger.error(f"Unexpected error getting database connection while using {endpoint_context}: {str(e)}")
         raise
 
 

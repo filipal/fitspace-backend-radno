@@ -46,8 +46,23 @@ pip install -r requirements.txt
 ```bash
 # Replace with your actual AWS credentials
 export DB_SECRET_ARN="arn:aws:secretsmanager:eu-central-1:027728694574:secret:pixel-streaming-db-credentials-drsymw"
+
+# Default behaviour (via RDS Proxy)
 export DB_PROXY_ENDPOINT="pixel-streaming-rds-proxy.proxy-chku4sk8sd1x.eu-central-1.rds.amazonaws.com"
+
+# Optional: point directly to the Aurora cluster (skips the proxy)
+# export DB_CLUSTER_ENDPOINT="pixel-streaming.cluster-chku4sk8sd1x.eu-central-1.rds.amazonaws.com"
+
+# Optional: provide explicit connection details instead of Secrets Manager
+# export DB_HOST="localhost"
+# export DB_NAME="fitspace"
+# export DB_USERNAME="postgres"
+# export DB_PASSWORD="postgres"
+# export DB_PORT="5432"
 ```
+> ℹ️ When both `DB_CLUSTER_ENDPOINT` and `DB_PROXY_ENDPOINT` are set, the backend will prefer
+> the cluster endpoint. If no cluster endpoint is available, it will fall back to the host
+> stored in the secret (if present) or the proxy endpoint.
 
 ### **Step 3: Start Development Server**
 ```bash
