@@ -174,7 +174,7 @@ class TestAPIRoutes:
             'path': '/api/v1/users/1',
             'httpMethod': 'GET'
         }
-        
+
         mock_user = {
             'id': 1,
             'name': 'John Doe',
@@ -182,17 +182,23 @@ class TestAPIRoutes:
             'created_at': '2023-01-01'
         }
         
-        with patch('src.routes.api_routes.User') as mock_user_class:
+        with patch('src.routes.api_routes.User') as mock_user_class, \
+            patch('src.routes.api_routes.Avatar') as mock_avatar_class:
             mock_user_instance = Mock()
             mock_user_class.return_value = mock_user_instance
             mock_user_instance.get_by_id.return_value = mock_user
-            
+
+            mock_avatar_instance = Mock()
+            mock_avatar_class.return_value = mock_avatar_instance
+            mock_avatar_instance.list_for_user.return_value = [{'id': 2, 'display_name': 'Default'}]
+
             response = api_routes.handle_request(event, self.mock_connection)
             
             assert response['statusCode'] == 200
             response_body = json.loads(response['body'])
             assert response_body['data']['id'] == 1
-    
+            assert response_body['data']['avatars'] == [{'id': 2, 'display_name': 'Default'}]
+
     def test_get_single_user_not_found(self):
         """Test get single user that doesn't exist"""
         event = {

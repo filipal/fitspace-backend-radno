@@ -7,6 +7,7 @@ import os
 from src.utils.response import create_response, create_error_response, create_success_response, create_paginated_response
 from src.utils.database import execute_query
 from src.models.user import User
+from src.models.avatar import Avatar
 
 logger = logging.getLogger(__name__)
 
@@ -135,26 +136,253 @@ def handle_v1_routes(event, connection):
     
     # Remove /api/v1 prefix
     route = path.replace('/api/v1', '') or '/'
-    
+
+    segments = [segment for segment in route.split('/') if segment]
+
     # User endpoints
     if route == '/users' and method == 'GET':
         return get_users(event, connection)
     elif route == '/users' and method == 'POST':
         return create_user(event, connection)
-    elif route.startswith('/users/') and method == 'GET':
-        user_id = route.split('/')[-1]
-        return get_user(user_id, connection)
-    elif route.startswith('/users/') and method == 'PUT':
-        user_id = route.split('/')[-1]
-        return update_user(user_id, event, connection)
-    elif route.startswith('/users/') and method == 'DELETE':
-        user_id = route.split('/')[-1]
-        return delete_user(user_id, connection)
     elif route == '/users/search' and method == 'GET':
         return search_users(event, connection)
-    
+
+    elif len(segments) >= 2 and segments[0] == 'users' and segments[1] == 'search':
+        return create_error_response(404, f'Route not found: {method} {route}')
+    elif len(segments) >= 3 and segments[0] == 'users' and segments[2] == 'avatars':
+        user_id = segments[1]
+        avatar_segments = segments[3:]
+
+        if not avatar_segments:
+            if method == 'POST':
+                return create_avatar(user_id, event, connection)
+            if method == 'GET':
+                return list_avatars(user_id, connection)
+        elif len(avatar_segments) == 1:
+            avatar_id = avatar_segments[0]
+            if method == 'GET':
+                return get_avatar(user_id, avatar_id, connection)
+            if method == 'PATCH':
+                return update_avatar(user_id, avatar_id, event, connection)
+            if method == 'DELETE':
+                return delete_avatar(user_id, avatar_id, connection)
+
+        return create_error_response(404, f'Route not found: {method} {route}')
+    elif len(segments) >= 2 and segments[0] == 'users':
+        user_id = segments[1]
+        if method == 'GET':
+            return get_user(user_id, connection)
+        if method == 'PUT':
+            return update_user(user_id, event, connection)
+        if method == 'DELETE':
+            return delete_user(user_id, connection)
+    elif route == '/users/search' and method == 'GET':
+        return search_users(event, connection)
+
     return create_error_response(404, f'Route not found: {method} {route}')
 
+def _parse_positive_int(value, error_message):
+    try:
+        parsed = int(value)
+        if parsed <= 0:
+            raise ValueError
+        return parsed
+    except (TypeError, ValueError):
+        raise ValueError(error_message)
+
+
+def _validate_avatar_payload(payload, *, partial=False):
+    if not isinstance(payload, dict):
+        raise ValueError('Payload must be a JSON object')
+
+    allowed_fields = {
+        'display_name',
+        'age',
+        'gender',
+        'height_cm',
+        'weight_kg',
+        'body_fat_percent',
+        'shoulder_circumference_cm',
+        'waist_cm',
+        'hips_cm',
+        'notes'
+    }
+
+    unknown_fields = set(payload.keys()) - allowed_fields
+    if unknown_fields:
+        raise ValueError(f'Unsupported avatar fields: {", ".join(sorted(unknown_fields))}')
+
+    cleaned = {}
+
+    if 'display_name' in payload:
+        display_name = str(payload['display_name']).strip()
+        if display_name and len(display_name) > 255:
+            raise ValueError('Display name must be 255 characters or less')
+        cleaned['display_name'] = display_name or None
+
+    if 'age' in payload:
+        age_raw = payload['age']
+        if age_raw is None or str(age_raw).strip() == '':
+            cleaned['age'] = None
+        else:
+            try:
+                age_value = int(age_raw)
+            except (TypeError, ValueError):
+                raise ValueError('Age must be an integer')
+            if age_value < 0 or age_value > 120:
+                raise ValueError('Age must be between 0 and 120')
+            cleaned['age'] = age_value
+
+    if 'gender' in payload:
+        gender = str(payload['gender']).strip().lower()
+        if gender:
+            allowed_genders = {
+                'male',
+                'female',
+                'non-binary',
+                'other',
+                'prefer_not_to_say'
+            }
+            if gender not in allowed_genders:
+                raise ValueError('Gender must be one of: male, female, non-binary, other, prefer_not_to_say')
+            cleaned['gender'] = gender
+        else:
+            cleaned['gender'] = None
+
+    numeric_constraints = {
+        'height_cm': (50, 300),
+        'weight_kg': (20, 500),
+        'body_fat_percent': (0, 80),
+        'shoulder_circumference_cm': (20, 300),
+        'waist_cm': (30, 300),
+        'hips_cm': (30, 300)
+    }
+
+    for field, (minimum, maximum) in numeric_constraints.items():
+        if field in payload:
+            raw_value = payload[field]
+            if raw_value is None or str(raw_value).strip() == '':
+                cleaned[field] = None
+                continue
+            try:
+                numeric_value = float(raw_value)
+            except (TypeError, ValueError):
+                raise ValueError(f'{field} must be a number')
+            if numeric_value < minimum or numeric_value > maximum:
+                raise ValueError(f'{field} must be between {minimum} and {maximum}')
+            cleaned[field] = numeric_value
+
+    if 'notes' in payload:
+        notes_value = str(payload['notes']).strip()
+        if notes_value and len(notes_value) > 1000:
+            raise ValueError('Notes must be 1000 characters or less')
+        cleaned['notes'] = notes_value or None
+
+    if not partial and not cleaned:
+        raise ValueError('At least one avatar attribute must be provided')
+
+    if partial and not cleaned:
+        raise ValueError('No valid avatar fields provided for update')
+
+    return cleaned
+
+
+def create_avatar(user_id, event, connection):
+    try:
+        user_id_int = _parse_positive_int(user_id, 'Invalid user ID format')
+        body = json.loads(event.get('body', '{}'))
+        payload = _validate_avatar_payload(body, partial=False)
+
+        avatar_model = Avatar(connection)
+        created_avatar = avatar_model.create(user_id_int, payload)
+
+        return create_success_response(created_avatar, 'Avatar created successfully')
+    except json.JSONDecodeError:
+        return create_error_response(400, 'Invalid JSON in request body')
+    except ValueError as exc:
+        logger.error(f'Validation error in create_avatar: {str(exc)}')
+        return create_error_response(400, str(exc))
+    except Exception as exc:
+        logger.error(f'Error creating avatar for user {user_id}: {str(exc)}')
+        return create_error_response(500, 'Failed to create avatar', str(exc))
+
+
+def list_avatars(user_id, connection):
+    try:
+        user_id_int = _parse_positive_int(user_id, 'Invalid user ID format')
+        avatar_model = Avatar(connection)
+        avatars = avatar_model.list_for_user(user_id_int)
+        return create_success_response(avatars, 'Avatars retrieved successfully')
+    except ValueError as exc:
+        logger.error(f'Validation error in list_avatars: {str(exc)}')
+        return create_error_response(400, str(exc))
+    except Exception as exc:
+        logger.error(f'Error listing avatars for user {user_id}: {str(exc)}')
+        return create_error_response(500, 'Failed to retrieve avatars', str(exc))
+
+
+def get_avatar(user_id, avatar_id, connection):
+    try:
+        user_id_int = _parse_positive_int(user_id, 'Invalid user ID format')
+        avatar_id_int = _parse_positive_int(avatar_id, 'Invalid avatar ID format')
+
+        avatar_model = Avatar(connection)
+        avatar = avatar_model.get(user_id_int, avatar_id_int)
+
+        if not avatar:
+            return create_error_response(404, 'Avatar not found')
+
+        return create_success_response(avatar, 'Avatar retrieved successfully')
+    except ValueError as exc:
+        logger.error(f'Validation error in get_avatar: {str(exc)}')
+        return create_error_response(400, str(exc))
+    except Exception as exc:
+        logger.error(f'Error retrieving avatar {avatar_id} for user {user_id}: {str(exc)}')
+        return create_error_response(500, 'Failed to retrieve avatar', str(exc))
+
+
+def update_avatar(user_id, avatar_id, event, connection):
+    try:
+        user_id_int = _parse_positive_int(user_id, 'Invalid user ID format')
+        avatar_id_int = _parse_positive_int(avatar_id, 'Invalid avatar ID format')
+        body = json.loads(event.get('body', '{}'))
+        payload = _validate_avatar_payload(body, partial=True)
+
+        avatar_model = Avatar(connection)
+        updated_avatar = avatar_model.update(user_id_int, avatar_id_int, payload)
+
+        if not updated_avatar:
+            return create_error_response(404, 'Avatar not found')
+
+        return create_success_response(updated_avatar, 'Avatar updated successfully')
+    except json.JSONDecodeError:
+        return create_error_response(400, 'Invalid JSON in request body')
+    except ValueError as exc:
+        logger.error(f'Validation error in update_avatar: {str(exc)}')
+        return create_error_response(400, str(exc))
+    except Exception as exc:
+        logger.error(f'Error updating avatar {avatar_id} for user {user_id}: {str(exc)}')
+        return create_error_response(500, 'Failed to update avatar', str(exc))
+
+
+def delete_avatar(user_id, avatar_id, connection):
+    try:
+        user_id_int = _parse_positive_int(user_id, 'Invalid user ID format')
+        avatar_id_int = _parse_positive_int(avatar_id, 'Invalid avatar ID format')
+
+        avatar_model = Avatar(connection)
+        deleted = avatar_model.delete(user_id_int, avatar_id_int)
+
+        if not deleted:
+            return create_error_response(404, 'Avatar not found')
+
+        return create_success_response({'id': avatar_id_int}, 'Avatar deleted successfully')
+    except ValueError as exc:
+        logger.error(f'Validation error in delete_avatar: {str(exc)}')
+        return create_error_response(400, str(exc))
+    except Exception as exc:
+        logger.error(f'Error deleting avatar {avatar_id} for user {user_id}: {str(exc)}')
+        return create_error_response(500, 'Failed to delete avatar', str(exc))
 
 def get_users(event, connection):
     """
@@ -260,10 +488,13 @@ def get_user(user_id, connection):
         # Get user using User model
         user_model = User(connection)
         user = user_model.get_by_id(user_id_int)
-        
+
         if not user:
             return create_error_response(404, 'User not found')
-        
+
+        avatar_model = Avatar(connection)
+        user['avatars'] = avatar_model.list_for_user(user_id_int)
+
         return create_success_response(user, 'User retrieved successfully')
         
     except Exception as e:
