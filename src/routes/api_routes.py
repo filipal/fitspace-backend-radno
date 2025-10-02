@@ -294,7 +294,8 @@ def create_avatar(user_id, event, connection):
         payload = _validate_avatar_payload(body, partial=False)
 
         avatar_model = Avatar(connection)
-        created_avatar = avatar_model.create(user_id_int, payload)
+        cleaned_payload = {**payload}
+        created_avatar = avatar_model.create(user_id=user_id_int, **cleaned_payload)
 
         return create_success_response(created_avatar, 'Avatar created successfully')
     except json.JSONDecodeError:
@@ -311,7 +312,7 @@ def list_avatars(user_id, connection):
     try:
         user_id_int = _parse_positive_int(user_id, 'Invalid user ID format')
         avatar_model = Avatar(connection)
-        avatars = avatar_model.list_for_user(user_id_int)
+        avatars = avatar_model.list_by_user(user_id_int)
         return create_success_response(avatars, 'Avatars retrieved successfully')
     except ValueError as exc:
         logger.error(f'Validation error in list_avatars: {str(exc)}')
@@ -327,9 +328,9 @@ def get_avatar(user_id, avatar_id, connection):
         avatar_id_int = _parse_positive_int(avatar_id, 'Invalid avatar ID format')
 
         avatar_model = Avatar(connection)
-        avatar = avatar_model.get(user_id_int, avatar_id_int)
+        avatar = avatar_model.get(avatar_id_int)
 
-        if not avatar:
+        if not avatar or avatar.get('user_id') != user_id_int:
             return create_error_response(404, 'Avatar not found')
 
         return create_success_response(avatar, 'Avatar retrieved successfully')
@@ -349,9 +350,14 @@ def update_avatar(user_id, avatar_id, event, connection):
         payload = _validate_avatar_payload(body, partial=True)
 
         avatar_model = Avatar(connection)
-        updated_avatar = avatar_model.update(user_id_int, avatar_id_int, payload)
+        cleaned_payload = {**payload}
+        updated_avatar = avatar_model.update_partial(
+            avatar_id_int,
+            user_id=user_id_int,
+            **cleaned_payload
+        )
 
-        if not updated_avatar:
+        if not updated_avatar or updated_avatar.get('user_id') != user_id_int:
             return create_error_response(404, 'Avatar not found')
 
         return create_success_response(updated_avatar, 'Avatar updated successfully')
@@ -371,7 +377,11 @@ def delete_avatar(user_id, avatar_id, connection):
         avatar_id_int = _parse_positive_int(avatar_id, 'Invalid avatar ID format')
 
         avatar_model = Avatar(connection)
-        deleted = avatar_model.delete(user_id_int, avatar_id_int)
+        avatar = avatar_model.get(avatar_id_int)
+        if not avatar or avatar.get('user_id') != user_id_int:
+            return create_error_response(404, 'Avatar not found')
+
+        deleted = avatar_model.delete(avatar_id_int)
 
         if not deleted:
             return create_error_response(404, 'Avatar not found')

@@ -55,8 +55,9 @@ class TestAvatarRoutes:
             assert body['data']['display_name'] == 'Competition Prep'
 
             create_args = mock_avatar_instance.create.call_args
-            assert create_args[0][0] == 1
-            assert create_args[0][1] == {
+            assert create_args.args == ()
+            assert create_args.kwargs == {
+                'user_id': 1,
                 'display_name': 'Competition Prep',
                 'age': 28,
                 'gender': 'female',
@@ -80,14 +81,14 @@ class TestAvatarRoutes:
         with patch('src.routes.api_routes.Avatar') as mock_avatar_class:
             mock_instance = Mock()
             mock_avatar_class.return_value = mock_instance
-            mock_instance.list_for_user.return_value = avatars
+            mock_instance.list_by_user.return_value = avatars
 
             response = api_routes.handle_request(event, self.connection)
 
             assert response['statusCode'] == 200
             body = json.loads(response['body'])
             assert len(body['data']) == 2
-            mock_instance.list_for_user.assert_called_once_with(2)
+            mock_instance.list_by_user.assert_called_once_with(2)
 
     def test_get_avatar_success(self):
         event = {
@@ -107,7 +108,7 @@ class TestAvatarRoutes:
             assert response['statusCode'] == 200
             body = json.loads(response['body'])
             assert body['data']['id'] == 5
-            mock_instance.get.assert_called_once_with(3, 5)
+            mock_instance.get.assert_called_once_with(5)
 
     def test_patch_avatar_partial_update(self):
         event = {
@@ -121,7 +122,7 @@ class TestAvatarRoutes:
         with patch('src.routes.api_routes.Avatar') as mock_avatar_class:
             mock_instance = Mock()
             mock_avatar_class.return_value = mock_instance
-            mock_instance.update.return_value = updated_avatar
+            mock_instance.update_partial.return_value = updated_avatar
 
             response = api_routes.handle_request(event, self.connection)
 
@@ -129,8 +130,9 @@ class TestAvatarRoutes:
             body = json.loads(response['body'])
             assert body['data']['weight_kg'] == 82.4
 
-            mock_instance.update.assert_called_once_with(
-                4,
+            mock_instance.update_partial.assert_called_once_with(
                 7,
-                {'weight_kg': 82.4, 'notes': 'updated'}
+                user_id=4,
+                weight_kg=82.4,
+                notes='updated'
             )
